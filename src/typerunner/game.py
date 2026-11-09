@@ -867,12 +867,18 @@ def draw_history(scr, app):
     else:
         green   = curses.color_pair(CP_GREEN) | curses.A_BOLD
         chart_h = max(4, min(8, _H - 16))
-        avail   = max(1, (inner - 8) // 3)
+        # Bars start wide and narrow as races pile up, so the whole history
+        # keeps fitting. Only once even single-column bars overflow does the
+        # oldest get dropped.
+        space   = max(1, inner - 8)
+        bar_w   = 3 if len(rows) * 3 <= space else (
+                  2 if len(rows) * 2 <= space else 1)
+        avail   = max(1, space // bar_w)
         vis     = rows[-avail:]
         bars, lo, hi = chart_block([r['wpm'] for r in vis],
                                    [r['accuracy'] for r in vis],
                                    levels=[r['level'] for r in vis],
-                                   rows=chart_h, bar_w=3)
+                                   rows=chart_h, bar_w=bar_w)
         lv_attr = {lv: curses.color_pair(p) | curses.A_BOLD
                    for lv, p in CP_LEVEL.items()}
         attr_of = {'bar': green, 'acc': gold}
@@ -1207,7 +1213,7 @@ class App:
         }
 
     def open_history(self, back=S_PLAYER):
-        self.history      = races_recent(self.player['id'], 40)
+        self.history      = races_recent(self.player['id'], 500)
         self.stats        = player_stats(self.player['id'])
         self.history_back = back
         self.screen       = S_HISTORY
