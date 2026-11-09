@@ -24,8 +24,12 @@ on. Two rivals race you down the lower lanes.
 
 ```sh
 brew tap tim-lgi/tap
+brew trust tim-lgi/tap
 brew install typerunner
 ```
+
+Homebrew asks you to trust any tap outside its own — `brew trust` is how you
+say this one is fine.
 
 Or, with any Python 3.9+:
 

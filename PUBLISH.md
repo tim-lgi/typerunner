@@ -56,12 +56,17 @@ git push -u origin main
 
 ```sh
 brew tap tim-lgi/tap
+brew trust tim-lgi/tap
 brew install typerunner
 typerunner
 ```
 
-Test it yourself first with `brew install --build-from-source typerunner`
-and `brew test typerunner`.
+`brew trust` is required because Homebrew refuses to load formulae from taps
+outside its own. Without it the install stops with
+`Refusing to load formula ... from untrusted tap`.
+
+Avoid `brew test` — it is a developer command and switches Homebrew into
+developer mode (undo with `brew developer off`).
 
 ---
 
