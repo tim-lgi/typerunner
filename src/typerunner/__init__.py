@@ -4,7 +4,7 @@ Copyright (C) 2026 Timothy Teetzel
 Licensed under the GNU General Public License v3.0 or later.
 """
 
-__version__ = "1.0.2"
+__version__ = "1.1.0"
 
 from .game import main
 

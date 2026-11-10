@@ -68,6 +68,71 @@ def make_words(level, n=40):
     band = WORDS[lo:hi] or WORDS
     return random.sample(band, min(n, len(band)))
 
+# ══ Teaching course ═══════════════════════════════════════════════════════════
+# A separate ladder from standard mode, which is untouched. Each stage adds one
+# specific finger movement and says plainly what that movement is, so the
+# learner knows what they are practising rather than just seeing new letters.
+# Stage 8's keys equal standard mode's, so finishing the course graduates you.
+TEACH = [
+    dict(n=1, add="a s d f j k l ;", keys="asdfjkl;",
+         lesson="Home position - no finger leaves its own key"),
+    dict(n=2, add="g h",     keys="asdfjkl;gh",
+         lesson="Index finger reaches inward"),
+    dict(n=3, add="e i",     keys="asdfjkl;ghei",
+         lesson="Middle finger reaches up"),
+    dict(n=4, add="r t u y", keys="asdfjkl;gheirtuy",
+         lesson="Index finger reaches up"),
+    dict(n=5, add="w o",     keys="asdfjkl;gheirtuywo",
+         lesson="Ring finger reaches up"),
+    dict(n=6, add="v b n m", keys="asdfjkl;gheirtuywovbnm",
+         lesson="Index finger reaches down"),
+    dict(n=7, add="c x , .", keys="asdfjkl;gheirtuywovbnmcx,.",
+         lesson="Middle and ring fingers reach down"),
+    dict(n=8, add="q p z /", keys="abcdefghijklmnopqrstuvwxyz;,./",
+         lesson="Pinky - the longest reaches of all"),
+]
+TEACH_WORDS = 20          # a stage is short: drills get tedious long before 40
+
+# Hand-shaped runs for the drill levels, where there are too few real words to
+# fill a stage. Ordered so the hands alternate rather than hammering one side.
+DRILL_RUNS = {
+    1: ("asdf jkl; fdsa ;lkj asjk dfkl jkas klsd aj sk dl f; "
+        "ff jj dd kk ss ll aa ;; fj dk sl a; jf kd ls ;a").split(),
+    2: ("gh hg fg jh gf hj fgh jhg ghjh fghj asdfg hjkl; gjhf "
+        "gg hh fgf jhj agh ;hg").split(),
+}
+
+def teach_pool(level):
+    """Real words a stage can spell, commonest first."""
+    keys = set(TEACH[level - 1]["keys"])
+    return [w for w in WORDS if set(w) <= keys]
+
+def make_teach_words(level, n=TEACH_WORDS):
+    """Drills carry the early stages; real words are mixed in from the start.
+
+    Levels 1 and 2 can only spell 11 and 27 real words, far too few to fill a
+    stage without repeating, so the bulk is finger drills. A real word lands
+    every second or third unit regardless, because pure drill is mind-numbing
+    and a word is the reward that makes the drill worth doing.
+    """
+    pool  = teach_pool(level)
+    runs  = DRILL_RUNS.get(level)
+    if not runs:                      # stage has vocabulary enough to stand alone
+        return random.sample(pool, min(n, len(pool))) if pool else ["asdf"] * n
+    out, since = [], 0
+    bag = []
+    while len(out) < n:
+        if pool and (since >= random.choice((1, 2))):
+            if not bag:
+                bag = random.sample(pool, len(pool))
+            out.append(bag.pop())
+            since = 0
+        else:
+            out.append(random.choice(runs))
+            since += 1
+    return out[:n]
+
+
 # ══ Sprites  (every row exactly 8 chars) ══════════════════════════════════════
 SRUN_W, SRUN_H = 8, 5
 
@@ -150,7 +215,8 @@ CREATE TABLE IF NOT EXISTS races (
     chars_ok    INTEGER NOT NULL,
     chars_tried INTEGER NOT NULL,
     place       INTEGER NOT NULL,
-    won         INTEGER NOT NULL
+    won         INTEGER NOT NULL,
+    mode        TEXT    NOT NULL DEFAULT 'standard'
 );
 CREATE INDEX IF NOT EXISTS idx_races_player ON races(player_id, id);
 """
@@ -174,6 +240,13 @@ def db_init():
     conn = sqlite3.connect(DB_PATH)
     try:
         conn.executescript(SCHEMA)
+        # Databases written before teaching mode existed have no mode column.
+        # Added rather than rebuilt, so existing races survive untouched and
+        # are counted as what they were: standard races.
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(races)")}
+        if "mode" not in cols:
+            conn.execute("ALTER TABLE races ADD COLUMN mode TEXT "
+                         "NOT NULL DEFAULT 'standard'")
         conn.commit()
     finally:
         conn.close()
@@ -205,7 +278,8 @@ def player_best(pid, level=None):
     counts as beating it. Levels use rarer and longer words, so a record is only
     meaningful against the same level — callers comparing a race pass its level.
     """
-    sql  = "SELECT wpm, accuracy FROM races WHERE player_id = ?"
+    sql  = ("SELECT wpm, accuracy FROM races "
+            "WHERE player_id = ? AND mode = 'standard'")
     args = [pid]
     if level is not None:
         sql += " AND level = ?"
@@ -222,13 +296,13 @@ def player_level_rows(pid):
                             COALESCE(ROUND(AVG(wpm)), 0) AS avg_wpm,
                             COALESCE(MAX(accuracy), 0)   AS best_acc,
                             COALESCE(SUM(won), 0)        AS wins
-                     FROM races WHERE player_id = ?
+                     FROM races WHERE player_id = ? AND mode = 'standard'
                      GROUP BY level ORDER BY level""", (pid,), fetch='all')
 
 def player_avg_wpm(pid, level):
     """(races_at_this_level, mean wpm) — drives the PACE runner's handicap."""
     row = db_run("""SELECT COUNT(*) AS n, COALESCE(AVG(wpm), 0) AS avg_wpm
-                    FROM races WHERE player_id = ? AND level = ?""",
+                    FROM races WHERE player_id = ? AND level = ? AND mode = 'standard'""",
                  (pid, level), fetch='one')
     return (row['n'], row['avg_wpm']) if row else (0, 0.0)
 
@@ -239,11 +313,12 @@ def player_stats(pid):
                COALESCE(ROUND(AVG(wpm)), 0)    AS avg_wpm,
                COALESCE(MAX(accuracy), 0)      AS best_acc,
                COALESCE(SUM(won), 0)           AS wins
-        FROM races WHERE player_id = ?
+        FROM races WHERE player_id = ? AND mode = 'standard'
     """, (pid,), fetch='one')
 
 def races_recent(pid, limit=20, level=None):
-    sql  = "SELECT wpm, accuracy, seconds, played_at, level, place FROM races WHERE player_id = ?"
+    sql  = ("SELECT wpm, accuracy, seconds, played_at, level, place FROM races "
+            "WHERE player_id = ? AND mode = 'standard'")
     args = [pid]
     if level is not None:
         sql += " AND level = ?"
@@ -253,13 +328,17 @@ def races_recent(pid, limit=20, level=None):
                                 tuple(args), fetch='all')))
 
 def race_save(pid, g, place, seconds):
+    # Teaching races are tagged, so they never enter standard-mode averages:
+    # drilling 'asdf' at 30 wpm would otherwise drag the PACE handicap down.
     return db_run("""
         INSERT INTO races (player_id, played_at, level, wpm, accuracy, score,
-                           seconds, words, chars_ok, chars_tried, place, won)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+                           seconds, words, chars_ok, chars_tried, place, won,
+                           mode)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
     """, (pid, datetime.now().isoformat(timespec='seconds'), g.level, g.wpm,
           g.accuracy, g.score, round(seconds, 2), g.total, g.chars_ok,
-          g.chars_tried, place, 1 if place == 1 else 0))
+          g.chars_tried, place, 1 if place == 1 else 0,
+          getattr(g, 'course', 'standard')))
 
 DASH = ('▁', '─', '▔')     # low / middle / high within a row
 
@@ -396,10 +475,23 @@ class Runner:
 
 # ══ Game ══════════════════════════════════════════════════════════════════════
 class Game:
-    def __init__(self, level, player_name, pace_wpm=None):
+    def __init__(self, level, player_name, pace_wpm=None,
+                 course='standard', pressure='race'):
         self.level       = level
+        self.course      = course          # 'standard' | 'teach'
+        self.pressure    = pressure        # 'race' | 'practice'
         self.score       = 0
-        self.words       = make_words(level)
+        self.streak = self.best_streak = 0
+        if course == 'teach':
+            stage        = TEACH[level - 1]
+            self.words   = make_teach_words(level)
+            self.keys    = set(stage['keys'])
+            self.lesson  = stage['lesson']
+        else:
+            self.words   = make_words(level)
+            self.keys    = None
+            self.lesson  = ""
+
         self.total       = len(self.words)
         self.total_chars = sum(map(len, self.words))
         self.wi = self.ci = 0
@@ -429,15 +521,25 @@ class Game:
 
         base = 20 + level * 7
         self.pace_wpm = pace_wpm if pace_wpm else base
-        self.runners = [
-            Runner(0, True,  player_name[:4].upper() or "YOU",  cp=CP_CYAN),
-            Runner(1, False, "PACE", ai_wpm=self.pace_wpm, cp=CP_MAGEN),
-            Runner(2, False, "RIVL", ai_wpm=base + 9,      cp=CP_YELLOW),
-        ]
+        self.runners = [Runner(0, True, player_name[:4].upper() or "YOU",
+                               cp=CP_CYAN)]
+        if pressure != 'practice':
+            self.runners += [
+                Runner(1, False, "PACE", ai_wpm=self.pace_wpm, cp=CP_MAGEN),
+                Runner(2, False, "RIVL", ai_wpm=base + 9,      cp=CP_YELLOW),
+            ]
         self.player = self.runners[0]
 
     def word(self):
         return self.words[self.wi] if self.wi < self.total else ""
+
+    def next_key(self):
+        """What the keyboard should highlight; empty while an error stands,
+        because the only useful key then is backspace."""
+        w = self.word()
+        if not w or self.error_at != -1:
+            return ""
+        return w[self.ci] if self.ci < len(w) else " "
 
     # ── input ────────────────────────────────────────────────────────────────
     def handle_key(self, ch):
@@ -474,6 +576,8 @@ class Game:
                 self.typed.append(chr(ch))
                 self.ci += 1
                 self.chars_ok += 1
+                self.streak += 1
+                self.best_streak = max(self.best_streak, self.streak)
                 if p.state in ('run', 'stretch'):
                     p.state, p.frame = 'run', p.frame ^ 1
                 p.pct = min(99.9, (self.chars_before + self.ci) / self.total_chars * 100)
@@ -484,6 +588,7 @@ class Game:
                 self.typed.append(chr(ch))
                 self.ci += 1
                 p.state, p.stum_tick, p.frame = 'stumble', 0.0, 0
+                self.streak = 0
             self.accuracy = int(self.chars_ok / self.chars_tried * 100)
 
     def _complete_word(self):
@@ -610,6 +715,73 @@ def draw_panel(scr, row, col, width, lines, attr):
 def centre(text, width):
     return text.center(width)
 
+# ══ Keyboard display (practice mode) ══════════════════════════════════════════
+# Three rows of ten, each boxed as [A] rather than a bare letter: reverse video
+# on three cells reads from across a room where one inverted character does not.
+# The modifier labels differ in width by one, which gives the rows their natural
+# stagger for free.
+KB_LAYOUT = (("[tab]",   "qwertyuiop"),
+             ("[caps]",  "asdfghjkl;"),
+             ("[shift]", "zxcvbnm,./"))
+
+# Colour by finger PAIR, not by hand, so the same colour means the same finger
+# on either side - that is the mapping a learner is trying to build.
+FINGER_PINKY, FINGER_RING, FINGER_MIDDLE, FINGER_INDEX = range(4)
+FINGER = {}
+for _f, _ks in ((FINGER_PINKY,  "qazp;/'"),
+                (FINGER_RING,   "wsxol."),
+                (FINGER_MIDDLE, "edcik,"),
+                (FINGER_INDEX,  "rfvtgbyhnujm")):
+    for _k in _ks:
+        FINGER[_k] = _f
+FINGER_CP = {FINGER_PINKY:  CP_MAGEN, FINGER_RING:   CP_TRACK,
+             FINGER_MIDDLE: CP_CYAN,  FINGER_INDEX:  CP_GREEN}
+FINGER_NAME = {FINGER_PINKY: "pinky", FINGER_RING: "ring",
+               FINGER_MIDDLE: "middle", FINGER_INDEX: "index"}
+
+def kb_geometry():
+    """[(row, label, [(key, x offset)])] - positions fixed once, not per frame."""
+    out = []
+    for i, (label, keys) in enumerate(KB_LAYOUT):
+        x, cells = len(label) + 1, []
+        for k in keys:
+            cells.append((k, x))
+            x += 4
+        out.append((i, label, cells))
+    return out
+
+KB_GEO   = kb_geometry()
+KB_WIDTH = max(len(lbl) + 1 + 4 * len(keys) - 1
+               for (lbl, keys) in KB_LAYOUT)
+KB_ROWS  = len(KB_LAYOUT) + 1          # letter rows plus the space bar
+
+def draw_keyboard(scr, top, left, active, nxt):
+    """active = keys this stage has unlocked; nxt = the key to press now.
+
+    Keys outside the stage stay dim, so the learner sees their territory and
+    what is still ahead of them.
+    """
+    hit  = curses.color_pair(CP_FG) | curses.A_REVERSE | curses.A_BOLD
+    off  = curses.color_pair(CP_NORM) | curses.A_DIM
+    for i, label, cells in KB_GEO:
+        y = top + i
+        safe_add(scr, y, left, label, off)
+        for k, dx in cells:
+            if k == nxt:
+                attr = hit
+            elif k in active:
+                attr = curses.color_pair(FINGER_CP[FINGER[k]]) | curses.A_BOLD
+            else:
+                attr = off
+            safe_add(scr, y, left + dx, f"[{k.upper()}]", attr)
+    bar   = "[" + " " * 22 + "]"
+    bar_x = left + (KB_WIDTH - len(bar)) // 2
+    y = top + len(KB_LAYOUT)
+    attr = hit if nxt == " " else (curses.color_pair(CP_NORM) | curses.A_BOLD)
+    safe_add(scr, y, bar_x, bar, attr)
+    safe_add(scr, y, bar_x + (len(bar) - 5) // 2, "space", attr)
+
+
 # ══ Layout constants ══════════════════════════════════════════════════════════
 # 0 stats · 1 blank · 2-6 word frame · 7-9 jump clearance · 10+ lanes
 # A lane is SRUN_H runner rows + 1 track row + headroom for the jump arc.
@@ -687,17 +859,26 @@ def draw_race(scr, app, g):
                            g.error_at, g.hurdle_set)
 
     # stats bar
-    mins, secs = divmod(g.elapsed, 60)
-    tstr = f"{int(mins)}:{secs:04.1f}" if mins else f"{secs:.1f}s"
     safe_add(scr, 0, 0, ' ' * w)
-    safe_add(scr, 0, 1,
-             f"{app.player['name'][:12]:<12} WPM {g.wpm:3d}   Acc {g.accuracy:3d}%   "
-             f"Time {tstr:>7}   Lv {g.level}   Score {g.score:5d}   "
-             f"Word {g.wi}/{g.total}",
-             curses.color_pair(CP_YELLOW))
-    title = " HURDLE RUSH "
+    if g.pressure == 'practice':
+        bar = (f"{app.player['name'][:12]:<12} Acc {g.accuracy:3d}%   "
+               f"Streak {g.streak:3d}   Best {g.best_streak:3d}   "
+               f"Stage {g.level}/8   Word {g.wi}/{g.total}")
+    else:
+        mins, secs = divmod(g.elapsed, 60)
+        tstr = f"{int(mins)}:{secs:04.1f}" if mins else f"{secs:.1f}s"
+        bar = (f"{app.player['name'][:12]:<12} WPM {g.wpm:3d}   "
+               f"Acc {g.accuracy:3d}%   Time {tstr:>7}   Lv {g.level}   "
+               f"Score {g.score:5d}   Word {g.wi}/{g.total}")
+    safe_add(scr, 0, 1, bar, curses.color_pair(CP_YELLOW))
+    title = " PRACTICE " if g.pressure == 'practice' else " HURDLE RUSH "
     safe_add(scr, 0, w - len(title) - 1, title,
              curses.color_pair(CP_CYAN) | curses.A_BOLD | curses.A_REVERSE)
+
+    # the stage's lesson, stated plainly so the learner knows what they drill
+    if g.lesson:
+        safe_add(scr, WORD_ROW + 5, 2, f"Stage {g.level}:  {g.lesson}",
+                 curses.color_pair(CP_GOLD) | curses.A_BOLD)
 
     # lanes
     hattr = curses.color_pair(CP_GOLD) | curses.A_BOLD
@@ -727,6 +908,13 @@ def draw_race(scr, app, g):
         else:
             draw_sprite(scr, base - min(r.lift(), max_lift),
                         r.screen_x(TX, track_w), art, r.cp)
+
+    if g.pressure == 'practice':
+        kb_top = BODY_Y + lane_h + 1
+        if kb_top + KB_ROWS <= _H:
+            draw_keyboard(scr, kb_top, max(0, (w - KB_WIDTH) // 2),
+                          g.keys or set("abcdefghijklmnopqrstuvwxyz;,./"),
+                          g.next_key())
 
     if over and app.result:
         draw_result_box(scr, app, g, elapsed)
@@ -760,14 +948,20 @@ def result_lines(app, g, width):
          gold if g.won else red),
         "",
         row("Player",   app.player['name'], cyan),
-        row("Finish",   f"{ORDINAL.get(g.place, g.place)} of {len(g.runners)}",
-            gold if g.won else norm),
+        *([] if g.pressure == 'practice' else
+          [row("Finish", f"{ORDINAL.get(g.place, g.place)} of {len(g.runners)}",
+               gold if g.won else norm)]),
         row("Time",     tstr),
         row("WPM",      f"{g.wpm}{cmp_}", green if res['is_best'] else norm),
         row("Accuracy", f"{g.accuracy}%"),
         row("Score",    f"{g.score}"),
         row("Level",    f"{g.level}"),
     ]
+    if g.pressure == 'practice':
+        lines.insert(2, row("Best streak", f"{g.best_streak} keys clean", cyan))
+    if g.lesson:
+        lines.append(("", norm))
+        lines.append((f"Stage {g.level} of 8:  {g.lesson}", gold))
     if res['is_best']:
         lines.append((centre(f"NEW BEST AT LEVEL {g.level}", inner), green))
     recent = res['recent']
@@ -828,10 +1022,20 @@ def draw_players(scr, app):
 
     if app.msg:
         lines.append((app.msg, curses.color_pair(CP_RED) | curses.A_BOLD))
-    lines += [(centre("up/down select    ENTER race    S player stats", inner), soft),
+    course_txt = "Teaching course" if app.course == 'teach' else "Standard"
+    press_txt  = "Practice (no clock)" if app.pressure == 'practice' else "Race the pacers"
+    lines += ["",
+              (f"  C  course     {course_txt}", gold),
+              (f"  M  mode       {press_txt}", gold)]
+    if app.course == 'teach':
+        st = TEACH[app.stage - 1]
+        lines += [(f"  [ ]  stage      {app.stage} of 8   adds  {st['add']}", gold),
+                  (f"       {st['lesson']}", norm)]
+    lines += ["",
+              (centre("up/down select    ENTER start    S player stats", inner), soft),
               (centre("N new player    D delete    Q quit", inner), soft)]
     if COFFEE_URL:
-        lines += ["", (centre("C   buy Tim a coffee", inner), gold)]
+        lines += ["", (centre("$   buy Tim a coffee", inner), gold)]
     draw_panel(scr, max(1, (_H - len(lines) - 2) // 3),
                (_W - width) // 2, width, lines, cyan)
 
@@ -1169,8 +1373,11 @@ class App:
         self.players = players_all()
         self.sel     = 0
         self.player  = None
-        self.level   = 1
-        self.game    = None
+        self.level    = 1
+        self.course   = 'standard'    # 'standard' | 'teach'
+        self.pressure = 'race'        # 'race' | 'practice'
+        self.stage    = 1             # chosen starting stage for the course
+        self.game     = None
         self.newname = ""
         self.msg     = ""
         self.confirm_delete = False
@@ -1186,10 +1393,15 @@ class App:
         self.sel = max(0, min(self.sel, len(self.players) - 1))
 
     def start_race(self, level=None):
-        self.level  = level or self.level
-        n, avg = player_avg_wpm(self.player['id'], self.level)
-        pace = avg * (1 - PACE_HANDICAP[self.level]) if n and avg else None
-        self.game   = Game(self.level, self.player['name'], pace_wpm=pace)
+        self.level = level or self.level
+        if self.course == 'teach':
+            self.game = Game(self.level, self.player['name'],
+                             course='teach', pressure=self.pressure)
+        else:
+            n, avg = player_avg_wpm(self.player['id'], self.level)
+            pace = avg * (1 - PACE_HANDICAP[self.level]) if n and avg else None
+            self.game = Game(self.level, self.player['name'], pace_wpm=pace,
+                             pressure=self.pressure)
         self.result = None
         self.screen = S_RACE
 
@@ -1238,7 +1450,15 @@ def keys_players(app, ch):
         p = app.players[app.sel]
         app.player = {'id': p['id'], 'name': p['name']}
         app.open_history(back=S_PLAYER)
-    elif ch in (ord('c'), ord('C')) and COFFEE_URL:
+    elif ch in (ord('c'), ord('C')):
+        app.course = 'teach' if app.course == 'standard' else 'standard'
+    elif ch in (ord('m'), ord('M')):
+        app.pressure = 'practice' if app.pressure == 'race' else 'race'
+    elif ch == ord('[') and app.course == 'teach':
+        app.stage = max(1, app.stage - 1)
+    elif ch == ord(']') and app.course == 'teach':
+        app.stage = min(len(TEACH), app.stage + 1)
+    elif ch in (ord('$'),) and COFFEE_URL:
         try:
             webbrowser.open(COFFEE_URL)
             app.msg = "opened in your browser - thank you"
@@ -1249,7 +1469,7 @@ def keys_players(app, ch):
     elif ch in (curses.KEY_ENTER, 10, 13) and n:
         p = app.players[app.sel]
         app.player = {'id': p['id'], 'name': p['name']}
-        app.start_race(1)
+        app.start_race(app.stage if app.course == 'teach' else 1)
     return True
 
 def keys_newname(app, ch):
