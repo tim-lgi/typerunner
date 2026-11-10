@@ -271,16 +271,15 @@ def player_delete(pid):
     db_run("DELETE FROM races WHERE player_id = ?", (pid,))
     db_run("DELETE FROM players WHERE id = ?", (pid,))
 
-def player_best(pid, level=None):
+def player_best(pid, level=None, mode='standard'):
     """Best result as (wpm, accuracy), for one level or across all of them.
 
     Accuracy breaks a tie on wpm, so matching your record at a cleaner accuracy
     counts as beating it. Levels use rarer and longer words, so a record is only
     meaningful against the same level — callers comparing a race pass its level.
     """
-    sql  = ("SELECT wpm, accuracy FROM races "
-            "WHERE player_id = ? AND mode = 'standard'")
-    args = [pid]
+    sql  = "SELECT wpm, accuracy FROM races WHERE player_id = ? AND mode = ?"
+    args = [pid, mode]
     if level is not None:
         sql += " AND level = ?"
         args.append(level)
@@ -288,7 +287,7 @@ def player_best(pid, level=None):
                  tuple(args), fetch='one')
     return (row['wpm'], row['accuracy']) if row else (0, 0)
 
-def player_level_rows(pid):
+def player_level_rows(pid, mode='standard'):
     """Per-level summary, so overall figures are never mistaken for level ones."""
     return db_run("""SELECT level,
                             COUNT(*)                     AS races,
@@ -296,30 +295,33 @@ def player_level_rows(pid):
                             COALESCE(ROUND(AVG(wpm)), 0) AS avg_wpm,
                             COALESCE(MAX(accuracy), 0)   AS best_acc,
                             COALESCE(SUM(won), 0)        AS wins
-                     FROM races WHERE player_id = ? AND mode = 'standard'
-                     GROUP BY level ORDER BY level""", (pid,), fetch='all')
+                     FROM races WHERE player_id = ? AND mode = ?
+                     GROUP BY level ORDER BY level""", (pid, mode), fetch='all')
 
-def player_avg_wpm(pid, level):
-    """(races_at_this_level, mean wpm) — drives the PACE runner's handicap."""
+def player_avg_wpm(pid, level, mode='standard'):
+    """(races at this level in this mode, mean wpm). Drives the PACE handicap,
+    and the comparison shown after a race - which must never cross modes: a
+    home-row drill at 25 wpm is not a bad standard race."""
     row = db_run("""SELECT COUNT(*) AS n, COALESCE(AVG(wpm), 0) AS avg_wpm
-                    FROM races WHERE player_id = ? AND level = ? AND mode = 'standard'""",
-                 (pid, level), fetch='one')
+                    FROM races
+                    WHERE player_id = ? AND level = ? AND mode = ?""",
+                 (pid, level, mode), fetch='one')
     return (row['n'], row['avg_wpm']) if row else (0, 0.0)
 
-def player_stats(pid):
+def player_stats(pid, mode='standard'):
     return db_run("""
         SELECT COUNT(*)                        AS races,
                COALESCE(MAX(wpm), 0)           AS best_wpm,
                COALESCE(ROUND(AVG(wpm)), 0)    AS avg_wpm,
                COALESCE(MAX(accuracy), 0)      AS best_acc,
                COALESCE(SUM(won), 0)           AS wins
-        FROM races WHERE player_id = ? AND mode = 'standard'
-    """, (pid,), fetch='one')
+        FROM races WHERE player_id = ? AND mode = ?
+    """, (pid, mode), fetch='one')
 
-def races_recent(pid, limit=20, level=None):
+def races_recent(pid, limit=20, level=None, mode='standard'):
     sql  = ("SELECT wpm, accuracy, seconds, played_at, level, place FROM races "
-            "WHERE player_id = ? AND mode = 'standard'")
-    args = [pid]
+            "WHERE player_id = ? AND mode = ?")
+    args = [pid, mode]
     if level is not None:
         sql += " AND level = ?"
         args.append(level)
@@ -935,10 +937,11 @@ def result_lines(app, g, width):
     mins, secs = divmod(res['seconds'], 60)
     tstr = f"{int(mins)}m {secs:05.2f}s" if mins else f"{secs:.2f}s"
     bw, ba = res['prev_best']
+    unit = "stage" if g.course == 'teach' else "lv"
     if res['prior_n']:
-        cmp_ = f"   (lv {g.level} avg {int(round(res['prior_avg']))}, best {bw})"
+        cmp_ = f"   ({unit} {g.level} avg {int(round(res['prior_avg']))}, best {bw})"
     else:
-        cmp_ = f"   (first race at level {g.level})"
+        cmp_ = f"   (first run at {unit} {g.level})"
 
     def row(label, value, a=norm):
         return (f"{label:<11}{value}", a)
@@ -955,15 +958,18 @@ def result_lines(app, g, width):
         row("WPM",      f"{g.wpm}{cmp_}", green if res['is_best'] else norm),
         row("Accuracy", f"{g.accuracy}%"),
         row("Score",    f"{g.score}"),
-        row("Level",    f"{g.level}"),
+        row("Stage" if g.course == 'teach' else "Level",
+            f"{g.level}" + (f" of {len(TEACH)}" if g.course == 'teach' else "")),
     ]
     if g.pressure == 'practice':
-        lines.insert(2, row("Best streak", f"{g.best_streak} keys clean", cyan))
+        lines.insert(2, row("Streak", f"{g.best_streak} keys clean", cyan))
     if g.lesson:
         lines.append(("", norm))
         lines.append((f"Stage {g.level} of 8:  {g.lesson}", gold))
     if res['is_best']:
-        lines.append((centre(f"NEW BEST AT LEVEL {g.level}", inner), green))
+        lines.append((centre(
+            f"NEW BEST AT {'STAGE' if g.course == 'teach' else 'LEVEL'} "
+            f"{g.level}", inner), green))
     recent = res['recent']
     if len(recent) > 1:
         rows_ = chart_block([r[0] for r in recent], [r[1] for r in recent],
@@ -971,7 +977,8 @@ def result_lines(app, g, width):
         rows_, lo, hi = rows_[0], rows_[1], rows_[2]
         attr_of = {'bar': green, 'acc': gold}
         last = len(rows_) - 1
-        lines += ["", (f"Progress   last {len(recent)} races at level {g.level}", cyan),
+        unit_l = "stage" if g.course == 'teach' else "level"
+        lines += ["", (f"Progress   last {len(recent)} runs at {unit_l} {g.level}", cyan),
                   [("bars wpm", green), ("    ", soft),
                    ("dashes accuracy", gold)]]
         for i, segs in enumerate(rows_):
@@ -984,7 +991,15 @@ def result_lines(app, g, width):
     return lines
 
 def draw_result_box(scr, app, g, elapsed):
-    width  = min(58, _W - 4)
+    # Sized to what it actually holds. Pinning it at 58 clipped the teaching
+    # lesson line, which is the longest thing this box ever shows.
+    width = min(58, _W - 4)
+    probe = result_lines(app, g, width)
+    def span(ln):
+        if isinstance(ln, list):  return sum(len(t) for t, _ in ln)
+        if isinstance(ln, tuple): return len(ln[0])
+        return len(ln)
+    width  = min(_W - 4, max(58, max((span(l) for l in probe), default=0) + 6))
     lines  = result_lines(app, g, width)
     height = len(lines) + 2
     # sit below the word frame, but ride up if a short terminal would clip it
@@ -1138,7 +1153,7 @@ def draw_history(scr, app):
                   (f"  {'all levels':<12}{st['races']:>6}{st['wins']:>6}"
                    f"{st['best_wpm']:>6}{int(st['avg_wpm']):>6}"
                    f"{st['best_acc']:>6}%", norm)]
-        for lr in player_level_rows(app.player['id']):
+        for lr in player_level_rows(app.player['id'], app.course):
             lines.append((f"  {'level ' + str(lr['level']):<12}{lr['races']:>6}"
                           f"{lr['wins']:>6}{lr['best_wpm']:>6}"
                           f"{int(lr['avg_wpm']):>6}{lr['best_acc']:>6}%", soft))
@@ -1443,11 +1458,11 @@ class App:
         g.saved = True
         # everything here is scoped to the level just raced — a level 3 run is
         # not comparable with a level 1 one, the words are rarer and longer
-        pid, lvl = self.player['id'], g.level
-        prev        = player_best(pid, lvl)             # (wpm, accuracy)
-        prior_n, prior_avg = player_avg_wpm(pid, lvl)   # what PACE was set from
+        pid, lvl, mode = self.player['id'], g.level, g.course
+        prev        = player_best(pid, lvl, mode)            # (wpm, accuracy)
+        prior_n, prior_avg = player_avg_wpm(pid, lvl, mode)
         race_save(pid, g, g.place, g.elapsed)
-        recent = races_recent(pid, 14, level=lvl)
+        recent = races_recent(pid, 14, level=lvl, mode=mode)
         self.result = {
             'seconds':   g.elapsed,
             'prev_best': prev,
@@ -1458,8 +1473,9 @@ class App:
         }
 
     def open_history(self, back=S_PLAYER):
-        self.history      = races_recent(self.player['id'], 500)
-        self.stats        = player_stats(self.player['id'])
+        self.history      = races_recent(self.player['id'], 500,
+                                         mode=self.course)
+        self.stats        = player_stats(self.player['id'], self.course)
         self.history_back = back
         self.screen       = S_HISTORY
 
