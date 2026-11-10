@@ -1037,19 +1037,30 @@ def draw_players(scr, app):
                     "Teaching" if app.course == 'teach' else "Standard"),
              toggle("M", "Mode", ("Race", "Practice"),
                     "Practice" if app.pressure == 'practice' else "Race")]
+    # The two stage rows are always present, blank on the standard course, so
+    # switching course changes the words on screen and nothing else. Letting
+    # them come and go resized the frame and shoved the whole panel about.
+    def stage_rows(stage):
+        st = TEACH[stage - 1]
+        return (f"  ◀ ▶   Stage     {stage} of {len(TEACH)}"
+                f"   adds  {st['add']}",
+                f"        {st['lesson']}")
     if app.course == 'teach':
-        st = TEACH[app.stage - 1]
-        body += [(f"  ◀ ▶   Stage     {app.stage} of {len(TEACH)}"
-                  f"   adds  {st['add']}", gold),
-                 (f"        {st['lesson']}", norm)]
+        top, low = stage_rows(app.stage)
+        body += [(top, gold), (low, norm)]
+    else:
+        body += ["", ""]
 
-    # Width follows the content. Fixing it at 54 is what clipped the lesson
-    # line; the panel has to be as wide as whatever it is asked to hold.
+    # Width is sized for the widest state this panel can ever hold, not the one
+    # it happens to be in, so it never changes either.
     def span(ln):
         if isinstance(ln, list): return sum(len(t) for t, _ in ln)
         if isinstance(ln, tuple): return len(ln[0])
         return len(ln)
-    width = min(_W - 4, max(54, max((span(l) for l in body), default=0) + 6))
+    widest = max((span(l) for l in body), default=0)
+    for st_i in range(1, len(TEACH) + 1):
+        widest = max(widest, *(len(r) for r in stage_rows(st_i)))
+    width = min(_W - 4, max(54, widest + 6))
     inner = width - 4
 
     lines = [(centre("HURDLE RUSH", inner), gold), ""] + body
