@@ -997,18 +997,27 @@ def draw_result_box(scr, app, g, elapsed):
 
 # ══ Player select ═════════════════════════════════════════════════════════════
 def draw_players(scr, app):
-    width = min(54, _W - 4)
-    inner = width - 4
-    cyan  = curses.color_pair(CP_CYAN) | curses.A_BOLD
-    soft   = curses.color_pair(CP_CYAN)
-    gold  = curses.color_pair(CP_GOLD) | curses.A_BOLD
-    norm  = curses.color_pair(CP_NORM) | curses.A_BOLD
+    cyan = curses.color_pair(CP_CYAN) | curses.A_BOLD
+    soft = curses.color_pair(CP_CYAN)
+    gold = curses.color_pair(CP_GOLD) | curses.A_BOLD
+    norm = curses.color_pair(CP_NORM) | curses.A_BOLD
+    off  = curses.color_pair(CP_NORM)
 
-    lines = [(centre("HURDLE RUSH", inner), gold), ""]
+    def toggle(key, label, options, active):
+        """key, what it controls, then every option with the live one bracketed,
+        so the setting and its alternative are both visible at a glance."""
+        cell = max(len(o) for o in options) + 6      # fixed, so the columns
+        segs = [(f"  {key}   {label:<9} ", gold)]      # hold still when toggled
+        for opt in options:
+            segs.append((f"[ {opt} ]".ljust(cell), gold) if opt == active
+                        else (f"  {opt}".ljust(cell), off))
+        return segs
+
+    body = []
     if not app.players:
-        lines += [("No players yet — press N to create one.", norm), ""]
+        body += [("No players yet - press N to create one.", norm), ""]
     else:
-        lines += [("Who is racing?", norm), ""]
+        body += [("Who is racing?", norm), ""]
         for i, p in enumerate(app.players):
             sel  = i == app.sel
             mark = '>' if sel else ' '
@@ -1017,20 +1026,33 @@ def draw_players(scr, app):
             else:
                 text = (f"{mark} {p['name'][:16]:<16}"
                         f"{p['best_wpm']:>5} wpm{p['races']:>5} races")
-            lines.append((text, cyan if sel else norm))
-        lines.append("")
+            body.append((text, cyan if sel else norm))
+        body.append("")
 
     if app.msg:
-        lines.append((app.msg, curses.color_pair(CP_RED) | curses.A_BOLD))
-    course_txt = "Teaching course" if app.course == 'teach' else "Standard"
-    press_txt  = "Practice (no clock)" if app.pressure == 'practice' else "Race the pacers"
-    lines += ["",
-              (f"  C  course     {course_txt}", gold),
-              (f"  M  mode       {press_txt}", gold)]
+        body.append((app.msg, curses.color_pair(CP_RED) | curses.A_BOLD))
+
+    body += ["",
+             toggle("C", "Course", ("Standard", "Teaching"),
+                    "Teaching" if app.course == 'teach' else "Standard"),
+             toggle("M", "Mode", ("Race", "Practice"),
+                    "Practice" if app.pressure == 'practice' else "Race")]
     if app.course == 'teach':
         st = TEACH[app.stage - 1]
-        lines += [(f"  [ ]  stage      {app.stage} of 8   adds  {st['add']}", gold),
-                  (f"       {st['lesson']}", norm)]
+        body += [(f"  ◀ ▶   Stage     {app.stage} of {len(TEACH)}"
+                  f"   adds  {st['add']}", gold),
+                 (f"        {st['lesson']}", norm)]
+
+    # Width follows the content. Fixing it at 54 is what clipped the lesson
+    # line; the panel has to be as wide as whatever it is asked to hold.
+    def span(ln):
+        if isinstance(ln, list): return sum(len(t) for t, _ in ln)
+        if isinstance(ln, tuple): return len(ln[0])
+        return len(ln)
+    width = min(_W - 4, max(54, max((span(l) for l in body), default=0) + 6))
+    inner = width - 4
+
+    lines = [(centre("HURDLE RUSH", inner), gold), ""] + body
     lines += ["",
               (centre("up/down select    ENTER start    S player stats", inner), soft),
               (centre("N new player    D delete    Q quit", inner), soft)]
@@ -1454,9 +1476,9 @@ def keys_players(app, ch):
         app.course = 'teach' if app.course == 'standard' else 'standard'
     elif ch in (ord('m'), ord('M')):
         app.pressure = 'practice' if app.pressure == 'race' else 'race'
-    elif ch == ord('[') and app.course == 'teach':
+    elif ch in (curses.KEY_LEFT, ord('[')) and app.course == 'teach':
         app.stage = max(1, app.stage - 1)
-    elif ch == ord(']') and app.course == 'teach':
+    elif ch in (curses.KEY_RIGHT, ord(']')) and app.course == 'teach':
         app.stage = min(len(TEACH), app.stage + 1)
     elif ch in (ord('$'),) and COFFEE_URL:
         try:
