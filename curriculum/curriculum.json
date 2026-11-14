@@ -1,0 +1,153 @@
+{
+  "note": "Canonical curriculum. Both the terminal game and the web app read this.",
+  "standard": {
+    "raceWords": 40,
+    "levels": [
+      {
+        "level": 1,
+        "from": 0,
+        "to": 1000
+      },
+      {
+        "level": 2,
+        "from": 0,
+        "to": 2000
+      },
+      {
+        "level": 3,
+        "from": 150,
+        "to": 3500
+      },
+      {
+        "level": 4,
+        "from": 400,
+        "to": 5500
+      },
+      {
+        "level": 5,
+        "from": 900,
+        "to": 7500
+      },
+      {
+        "level": 6,
+        "from": 1800,
+        "to": 9999
+      }
+    ],
+    "paceHandicap": {
+      "1": 0.1,
+      "2": 0.075,
+      "3": 0.05,
+      "4": 0.025,
+      "5": 0.0,
+      "6": 0.0
+    }
+  },
+  "teaching": {
+    "raceWords": 20,
+    "stages": [
+      {
+        "stage": 1,
+        "adds": "a s d f j k l ;",
+        "keys": "asdfjkl;",
+        "lesson": "Home position - no finger leaves its own key"
+      },
+      {
+        "stage": 2,
+        "adds": "g h",
+        "keys": "asdfjkl;gh",
+        "lesson": "Index finger reaches inward"
+      },
+      {
+        "stage": 3,
+        "adds": "e i",
+        "keys": "asdfjkl;ghei",
+        "lesson": "Middle finger reaches up"
+      },
+      {
+        "stage": 4,
+        "adds": "r t u y",
+        "keys": "asdfjkl;gheirtuy",
+        "lesson": "Index finger reaches up"
+      },
+      {
+        "stage": 5,
+        "adds": "w o",
+        "keys": "asdfjkl;gheirtuywo",
+        "lesson": "Ring finger reaches up"
+      },
+      {
+        "stage": 6,
+        "adds": "v b n m",
+        "keys": "asdfjkl;gheirtuywovbnm",
+        "lesson": "Index finger reaches down"
+      },
+      {
+        "stage": 7,
+        "adds": "c x , .",
+        "keys": "asdfjkl;gheirtuywovbnmcx,.",
+        "lesson": "Middle and ring fingers reach down"
+      },
+      {
+        "stage": 8,
+        "adds": "q p z /",
+        "keys": "abcdefghijklmnopqrstuvwxyz;,./",
+        "lesson": "Pinky - the longest reaches of all"
+      }
+    ],
+    "drills": {
+      "1": [
+        "asdf",
+        "jkl;",
+        "fdsa",
+        ";lkj",
+        "asjk",
+        "dfkl",
+        "jkas",
+        "klsd",
+        "aj",
+        "sk",
+        "dl",
+        "f;",
+        "ff",
+        "jj",
+        "dd",
+        "kk",
+        "ss",
+        "ll",
+        "aa",
+        ";;",
+        "fj",
+        "dk",
+        "sl",
+        "a;",
+        "jf",
+        "kd",
+        "ls",
+        ";a"
+      ],
+      "2": [
+        "gh",
+        "hg",
+        "fg",
+        "jh",
+        "gf",
+        "hj",
+        "fgh",
+        "jhg",
+        "ghjh",
+        "fghj",
+        "asdfg",
+        "hjkl;",
+        "gjhf",
+        "gg",
+        "hh",
+        "fgf",
+        "jhj",
+        "agh",
+        ";hg"
+      ]
+    }
+  },
+  "hurdleEvery": 6
+}
